@@ -52,25 +52,25 @@ switch:
 
 binary_sensor:
     - platform: gpio
-      pin: D6 # Enter Touch Sensor 1 pin
+      pin: D5 # Enter Touch Sensor 1 pin
       name: touch_1
       device_class: window
       on_press:
       - switch.toggle: relay1
     - platform: gpio
-      pin: D5  # Enter Touch Sensor 2 pin
+      pin: D6  # Enter Touch Sensor 2 pin
       name: touch_2
       on_press:
       - switch.toggle: relay2       
       device_class: window
     - platform: gpio
-      pin: D0 # Enter Touch Sensor 3 pin
+      pin: D7 # Enter Touch Sensor 3 pin
       name: touch_3
       device_class: window
       on_press:
       - switch.toggle: relay       
     - platform: gpio
-      pin: D7 # Enter Touch Sensor 4 pin
+      pin: D8 # Enter Touch Sensor 4 pin
       name: touch_4
       device_class: window      
       on_press:
@@ -79,7 +79,7 @@ light:
   - platform: neopixelbus
     type: GRB
     variant: ws2811
-    pin: D8 #Enter LedStrips pin
+    pin: D0 #Enter LedStrips pin
     num_leds: 16
     name: "NeoPixel Light"
     effects: 
