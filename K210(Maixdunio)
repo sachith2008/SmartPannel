@@ -1,0 +1,151 @@
+#include <Sipeed_ST7789.h>
+#include <SPI.h>
+#include <fpioa.h>
+#include <gpiohs.h>
+#include <uart.h>
+#include <DHT.h>
+
+#define SCREEN_WIDTH 320
+#define SCREEN_HEIGHT 240
+#define UART_BAUD 115200
+#define TFT_CS   10
+#define TFT_RST  8
+#define TFT_DC   9
+#define TFT_MOSI 11
+#define TFT_CLK  13
+#define K210_UART_TX 7
+#define K210_UART_RX 6
+#define DHTPIN 4
+#define DHTTYPE DHT11
+DHT dht(DHTPIN, DHTTYPE);
+#define OBSTACLE_SENSOR_PIN 3
+
+SPIClass spi_(SPI0);
+Sipeed_ST7789 lcd(SCREEN_WIDTH, SCREEN_HEIGHT, spi_);
+
+int slide = 0;
+unsigned long lastSlideChange = 0;
+unsigned long inactiveSlideDuration = 30000;
+unsigned long activeSlideDuration = 5000;
+unsigned long lastActivityTime = 0;
+int slideCycleCount = 0;
+bool handWaveDetected = false;
+bool colorfulMode = false;
+
+void setup() {
+    spi_.begin(TFT_CLK, -1, TFT_MOSI, TFT_CS);
+    lcd.begin(15000000);
+    lcd.setRotation(0);
+    lcd.fillScreen(COLOR_BLACK);
+    lcd.setTextSize(3);
+    lcd.setTextColor(COLOR_WHITE);
+
+    fpioa_set_function(K210_UART_RX, FUNC_UART1_RX);
+    fpioa_set_function(K210_UART_TX, FUNC_UART1_TX);
+    uart_init(UART_DEVICE_1);
+    uart_config(UART_DEVICE_1, UART_BAUD, UART_BITWIDTH_8BIT, UART_STOP_1, UART_PARITY_NONE);
+
+    dht.begin();
+    fpioa_set_function(OBSTACLE_SENSOR_PIN, FUNC_GPIOHS0);
+    gpiohs_set_drive_mode(0, GPIO_DM_INPUT);
+
+    Serial.begin(115200);
+    Serial.println("K210 ready for UART communication...");
+}
+
+void drawDarkerGradientTime() {
+    for (int y = 0; y < SCREEN_HEIGHT; y++) {
+        uint8_t r = map(y, 0, SCREEN_HEIGHT, 0x00, 0x40);
+        uint8_t g = map(y, 0, SCREEN_HEIGHT, 0x00, 0x00);
+        uint8_t b = map(y, 0, SCREEN_HEIGHT, 0x40, 0x20);
+        uint16_t color = ((r & 0xF8) << 8) | ((g & 0xFC) << 3) | (b >> 3);
+        lcd.drawFastHLine(0, y, SCREEN_WIDTH, color);
+    }
+}
+
+void drawDarkerGradientTemp() {
+    for (int y = 0; y < SCREEN_HEIGHT; y++) {
+        uint8_t r = map(y, 0, SCREEN_HEIGHT, 0x80, 0xFF);
+        uint8_t g = map(y, 0, SCREEN_HEIGHT, 0x40, 0x00);
+        uint8_t b = map(y, 0, SCREEN_HEIGHT, 0x00, 0x00);
+        uint16_t color = ((r & 0xF8) << 8) | ((g & 0xFC) << 3) | (b >> 3);
+        lcd.drawFastHLine(0, y, SCREEN_WIDTH, color);
+    }
+}
+
+void drawSolidBlack() {
+    lcd.fillScreen(COLOR_BLACK);
+}
+
+void loop() {
+    unsigned long currentMillis = millis();
+    int sensorState = gpiohs_get_pin(0);
+    if (sensorState == 1) {
+        handWaveDetected = true;
+        lastActivityTime = currentMillis;
+        colorfulMode = true;
+        slideCycleCount = 0;
+    }
+
+    if (handWaveDetected && (currentMillis - lastActivityTime >= 30000)) {
+        colorfulMode = false;
+    }
+
+    unsigned long slideInterval = colorfulMode ? activeSlideDuration : inactiveSlideDuration;
+
+    if (currentMillis - lastSlideChange >= slideInterval) {
+        lastSlideChange = currentMillis;
+        slide = (slide + 1) % 2;
+    }
+
+    char buffer[128];
+    int available_bytes = uart_receive_data(UART_DEVICE_1, buffer, sizeof(buffer));
+
+    if (available_bytes > 0) {
+        buffer[available_bytes] = '\0';
+        Serial.print("Received: ");
+        Serial.println((char*)buffer);
+
+        String receivedData = String((char*)buffer);
+        String date = receivedData.substring(0, 10);
+        String time = receivedData.substring(11);
+
+        if (colorfulMode) {
+            if (slide == 0) {
+                drawDarkerGradientTime();
+            } else if (slide == 1) {
+                drawDarkerGradientTemp();
+            }
+        } else {
+            drawSolidBlack();
+        }
+
+        if (slide == 0) {
+            lcd.setCursor(20, 20);
+            int hour = time.substring(0, 2).toInt();
+            String greeting = (hour >= 6 && hour < 12) ? "Good Morning" :
+                              (hour >= 12 && hour < 18) ? "Good Afternoon" :
+                              (hour >= 18 && hour < 24) ? "Good Evening" : "Good Night";
+
+            lcd.println(greeting);
+            lcd.setCursor(20, 100);
+            lcd.println("Date: " + date);
+            lcd.setCursor(20, 140);
+            lcd.println("Time: " + time);
+        } else if (slide == 1) {
+            float temp = dht.readTemperature();
+            float humidity = dht.readHumidity();
+            if (isnan(temp) || isnan(humidity)) {
+                lcd.setCursor(20, 50);
+                lcd.println("Error reading DHT11");
+            } else {
+                lcd.setCursor(20, 50);
+                lcd.println("Temp: " + String(temp) + " *C");
+                lcd.setCursor(20, 100);
+                lcd.println("Humidity: " + String(humidity) + "%");
+            }
+        }
+    }
+
+    delay(2000);
+}
